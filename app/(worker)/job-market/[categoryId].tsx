@@ -3,6 +3,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Modal,
   Platform,
@@ -94,7 +95,7 @@ export default function JobByCategoryScreen() {
 
       const jobRef = doc(db, "jobs", selectedJob.id);
 
-      // 1. Cập nhật Job thành 'accepted'
+      // 1. Cập nhật Job
       await updateDoc(jobRef, {
         status: "accepted",
         workerId: currentUserId,
@@ -102,24 +103,19 @@ export default function JobByCategoryScreen() {
         acceptedAt: serverTimestamp(),
       });
 
-      // 2. Tạo Chat ID
+      // 2. Tạo Chat ID & Metadata
       const chatId =
         currentUserId < selectedJob.clientId
           ? `${currentUserId}_${selectedJob.clientId}`
           : `${selectedJob.clientId}_${currentUserId}`;
 
-      const chatRef = doc(db, "chats", chatId);
-
-      // 3. Cập nhật Metadata phòng chat
       await setDoc(
-        chatRef,
+        doc(db, "chats", chatId),
         {
           lastMessage: "📍 Vị trí công việc đã được gửi",
           updatedAt: serverTimestamp(),
           users: [currentUserId, selectedJob.clientId],
           jobTitle: selectedJob.subService,
-          jobDate: selectedJob.workDate,
-          jobTime: selectedJob.workTime,
           [`name_${selectedJob.clientId}`]:
             selectedJob.clientName || "Khách hàng",
           [`name_${currentUserId}`]:
@@ -128,33 +124,23 @@ export default function JobByCategoryScreen() {
         { merge: true },
       );
 
-      // 4. ✅ TỰ ĐỘNG GỬI TIN NHẮN VỊ TRÍ
-      let locationMsg = `📍 Địa chỉ công việc: ${selectedJob.address}`;
+      // 3. Gửi tin nhắn vị trí (Lấy senderId là khách để hiện bên trái cho thợ xem)
       if (selectedJob.location) {
         await addDoc(collection(db, "chats", chatId, "messages"), {
-          text: "📍 Vị trí công việc", // Văn bản dự phòng
+          text: "📍 Vị trí công việc",
           senderId: selectedJob.clientId,
           createdAt: serverTimestamp(),
-          type: "location", // Đánh dấu loại tin nhắn là vị trí
+          type: "location",
           latitude: selectedJob.location.latitude,
           longitude: selectedJob.location.longitude,
         });
-      } else {
-        // Gửi tin nhắn text bình thường nếu không có tọa độ
-        await addDoc(collection(db, "chats", chatId, "messages"), {
-          text: `📍 Địa chỉ: ${selectedJob.address}`,
-          senderId: selectedJob.clientId,
-          createdAt: serverTimestamp(),
-          type: "text",
-        });
       }
-      // 5. Chuyển sang màn hình chat
+
       router.push(`/(worker)/chat/${selectedJob.clientId}` as any);
     } catch (error: any) {
-      console.error("Lỗi:", error.message);
+      Alert.alert("Lỗi", error.message);
     }
   };
-
   const formatPrice = (p: any) => {
     if (!p || p === "Thương lượng") return "Thỏa thuận";
     const numericPrice = typeof p === "string" ? p.replace(/,/g, "") : p;

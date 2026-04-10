@@ -14,7 +14,15 @@ import {
 } from "react-native";
 
 // Firebase
-import { doc, getDoc, serverTimestamp, updateDoc } from "firebase/firestore";
+import {
+  addDoc,
+  collection,
+  doc,
+  getDoc,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
+} from "firebase/firestore";
 import { auth, db } from "../../../configs/firebaseConfig";
 
 export default function JobDetailScreen() {
@@ -52,41 +60,64 @@ export default function JobDetailScreen() {
 
   // ✅ HÀM NHẬN VIỆC
   const handleAcceptJob = async () => {
-    Alert.alert(
-      "Xác nhận nhận việc",
-      "Khi nhấn 'Đồng ý', bạn cam kết sẽ hoàn thành công việc này đúng hẹn.",
-      [
-        { text: "Để sau", style: "cancel" },
-        {
-          text: "Đồng ý",
-          onPress: async () => {
-            setAccepting(true);
-            try {
-              const jobRef = doc(db, "jobs", jobId as string);
+    Alert.alert("Xác nhận", "Bạn đồng ý nhận việc này?", [
+      { text: "Hủy" },
+      {
+        text: "Đồng ý",
+        onPress: async () => {
+          setAccepting(true);
+          try {
+            const currentUserId = auth.currentUser?.uid;
+            if (!currentUserId || !job) return;
 
-              // Cập nhật trạng thái và gắn ID thợ vào đơn hàng
-              await updateDoc(jobRef, {
-                status: "accepted",
-                workerId: auth.currentUser?.uid,
-                workerName: auth.currentUser?.displayName || "Người làm",
-                acceptedAt: serverTimestamp(),
+            // 1. Cập nhật Job
+            await updateDoc(doc(db, "jobs", jobId as string), {
+              status: "accepted",
+              workerId: currentUserId,
+              workerName: auth.currentUser?.displayName || "Người làm",
+              acceptedAt: serverTimestamp(),
+            });
+
+            // 2. Tạo Chat & Gửi vị trí
+            const chatId =
+              currentUserId < job.clientId
+                ? `${currentUserId}_${job.clientId}`
+                : `${job.clientId}_${currentUserId}`;
+
+            await setDoc(
+              doc(db, "chats", chatId),
+              {
+                lastMessage: "📍 Vị trí công việc đã được gửi",
+                updatedAt: serverTimestamp(),
+                users: [currentUserId, job.clientId],
+                jobTitle: job.subService,
+                [`name_${job.clientId}`]: job.clientName || "Khách hàng",
+                [`name_${currentUserId}`]:
+                  auth.currentUser?.displayName || "Người làm",
+              },
+              { merge: true },
+            );
+
+            if (job.location) {
+              await addDoc(collection(db, "chats", chatId, "messages"), {
+                text: "📍 Vị trí công việc",
+                senderId: job.clientId,
+                createdAt: serverTimestamp(),
+                type: "location",
+                latitude: job.location.latitude,
+                longitude: job.location.longitude,
               });
-
-              Alert.alert(
-                "Thành công",
-                "Bạn đã nhận việc thành công! Hãy liên hệ với khách ngay nhé.",
-              );
-              // Chuyển hướng về tab Lịch trình của thợ
-              router.replace("/(worker)/(tabs)/schedule");
-            } catch (error: any) {
-              Alert.alert("Lỗi", "Không thể nhận việc: " + error.message);
-            } finally {
-              setAccepting(false);
             }
-          },
+
+            router.push(`/(worker)/chat/${job.clientId}` as any);
+          } catch (error: any) {
+            Alert.alert("Lỗi", error.message);
+          } finally {
+            setAccepting(false);
+          }
         },
-      ],
-    );
+      },
+    ]);
   };
 
   if (loading)

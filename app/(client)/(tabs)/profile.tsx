@@ -4,8 +4,10 @@ import React, { useCallback, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Platform,
   SafeAreaView,
   ScrollView,
+  StatusBar, // Thêm StatusBar
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -22,7 +24,6 @@ export default function ClientProfileScreen() {
   const [userData, setUserData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
-  // Tự động cập nhật dữ liệu khi quay lại từ trang chỉnh sửa
   useFocusEffect(
     useCallback(() => {
       const fetchUserData = async () => {
@@ -43,7 +44,6 @@ export default function ClientProfileScreen() {
     }, []),
   );
 
-  // ✅ Hàm xử lý đăng xuất
   const handleLogout = () => {
     Alert.alert("Xác nhận", "Bạn có chắc chắn muốn đăng xuất khỏi RAINN?", [
       { text: "Hủy", style: "cancel" },
@@ -70,122 +70,134 @@ export default function ClientProfileScreen() {
     );
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Hồ sơ khách hàng</Text>
-      </View>
+    <View style={styles.mainContainer}>
+      {/* 1. Thiết lập StatusBar trong suốt để nội dung đẩy lên từ đỉnh máy */}
+      <StatusBar
+        barStyle="dark-content"
+        backgroundColor="transparent"
+        translucent
+      />
 
-      <ScrollView showsVerticalScrollIndicator={false}>
-        {/* Khu vực thông tin người dùng chính */}
-        <View style={styles.userSection}>
-          <View style={styles.avatarWrapper}>
-            <Ionicons name="person-circle" size={90} color="#1BA39C" />
-          </View>
-          <View style={styles.userMeta}>
-            <Text style={styles.userName}>
-              {userData?.fullName || "Khách hàng"}
-            </Text>
-            <Text style={styles.userPhone}>
-              {userData?.phone || "Chưa cập nhật SĐT"}
-            </Text>
-            <Text style={styles.userEmail}>{userData?.email}</Text>
-          </View>
+      <SafeAreaView style={{ flex: 1 }}>
+        {/* 2. Header đã fix khoảng cách đỉnh né Camera */}
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Hồ sơ khách hàng</Text>
         </View>
 
-        {/* Nhóm menu 1: Quản lý tài khoản */}
-        <View style={styles.menuGroup}>
-          <Text style={styles.groupLabel}>Quản lý tài khoản</Text>
-
-          <TouchableOpacity
-            style={styles.menuItem}
-            onPress={() => router.push("/(client)/(tabs)/profile-edit" as any)}
-          >
-            <View style={[styles.iconBox, { backgroundColor: "#E0F2F1" }]}>
-              <Ionicons name="create-outline" size={20} color="#1BA39C" />
+        <ScrollView showsVerticalScrollIndicator={false}>
+          <View style={styles.userSection}>
+            <View style={styles.avatarWrapper}>
+              <Ionicons name="person-circle" size={90} color="#1BA39C" />
             </View>
-            <Text style={styles.menuText}>Chỉnh sửa hồ sơ cá nhân</Text>
-            <Ionicons name="chevron-forward" size={18} color="#CCC" />
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.menuItem}>
-            <View style={[styles.iconBox, { backgroundColor: "#E3F2FD" }]}>
-              <Ionicons name="card-outline" size={20} color="#2196F3" />
+            <View style={styles.userMeta}>
+              <Text style={styles.userName}>
+                {userData?.fullName || "Khách hàng"}
+              </Text>
+              <Text style={styles.userPhone}>
+                {userData?.phone || "Chưa cập nhật SĐT"}
+              </Text>
+              <Text style={styles.userEmail}>{userData?.email}</Text>
             </View>
-            <Text style={styles.menuText}>Phương thức thanh toán</Text>
-            <Ionicons name="chevron-forward" size={18} color="#CCC" />
-          </TouchableOpacity>
+          </View>
 
-          <TouchableOpacity style={styles.menuItem}>
-            <View style={[styles.iconBox, { backgroundColor: "#E8F5E9" }]}>
-              <Ionicons name="settings-outline" size={20} color="#4CAF50" />
-            </View>
-            <Text style={styles.menuText}>Cài đặt ứng dụng</Text>
-            <Ionicons name="chevron-forward" size={18} color="#CCC" />
-          </TouchableOpacity>
-        </View>
+          <View style={styles.menuGroup}>
+            <Text style={styles.groupLabel}>Quản lý tài khoản</Text>
 
-        {/* Nhóm menu 2: Hỗ trợ & Thông tin */}
-        <View style={styles.menuGroup}>
-          <Text style={styles.groupLabel}>Hỗ trợ & Bảo mật</Text>
-
-          <TouchableOpacity style={styles.menuItem}>
-            <View style={[styles.iconBox, { backgroundColor: "#F3E5F5" }]}>
-              <Ionicons name="help-buoy-outline" size={20} color="#9C27B0" />
-            </View>
-            <Text style={styles.menuText}>Trung tâm trợ giúp</Text>
-            <Ionicons name="chevron-forward" size={18} color="#CCC" />
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.menuItem}>
-            <View style={[styles.iconBox, { backgroundColor: "#FFEBEE" }]}>
-              <Ionicons
-                name="shield-checkmark-outline"
-                size={20}
-                color="#F44336"
-              />
-            </View>
-            <Text style={styles.menuText}>Chính sách bảo mật</Text>
-            <Ionicons name="chevron-forward" size={18} color="#CCC" />
-          </TouchableOpacity>
-
-          {/* ✅ MỤC ĐĂNG XUẤT (Giống bên Worker) */}
-          <TouchableOpacity
-            style={[styles.menuItem, { borderBottomWidth: 0, marginTop: 5 }]}
-            onPress={handleLogout}
-          >
-            <View style={[styles.iconBox, { backgroundColor: "#FFEBEE" }]}>
-              <Ionicons name="log-out-outline" size={22} color="#F44336" />
-            </View>
-            <Text
-              style={[
-                styles.menuText,
-                { color: "#F44336", fontWeight: "bold" },
-              ]}
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() =>
+                router.push("/(client)/(tabs)/profile-edit" as any)
+              }
             >
-              Đăng xuất
-            </Text>
-            <Ionicons name="chevron-forward" size={18} color="#FFEBEE" />
-          </TouchableOpacity>
-        </View>
+              <View style={[styles.iconBox, { backgroundColor: "#E0F2F1" }]}>
+                <Ionicons name="create-outline" size={20} color="#1BA39C" />
+              </View>
+              <Text style={styles.menuText}>Chỉnh sửa hồ sơ cá nhân</Text>
+              <Ionicons name="chevron-forward" size={18} color="#CCC" />
+            </TouchableOpacity>
 
-        <View style={styles.footer}>
-          <Text style={styles.versionText}>RAINN App v1.0.0</Text>
-        </View>
+            <TouchableOpacity style={styles.menuItem}>
+              <View style={[styles.iconBox, { backgroundColor: "#E3F2FD" }]}>
+                <Ionicons name="card-outline" size={20} color="#2196F3" />
+              </View>
+              <Text style={styles.menuText}>Phương thức thanh toán</Text>
+              <Ionicons name="chevron-forward" size={18} color="#CCC" />
+            </TouchableOpacity>
 
-        <View style={{ height: 100 }} />
-      </ScrollView>
-    </SafeAreaView>
+            <TouchableOpacity style={styles.menuItem}>
+              <View style={[styles.iconBox, { backgroundColor: "#E8F5E9" }]}>
+                <Ionicons name="settings-outline" size={20} color="#4CAF50" />
+              </View>
+              <Text style={styles.menuText}>Cài đặt ứng dụng</Text>
+              <Ionicons name="chevron-forward" size={18} color="#CCC" />
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.menuGroup}>
+            <Text style={styles.groupLabel}>Hỗ trợ & Bảo mật</Text>
+
+            <TouchableOpacity style={styles.menuItem}>
+              <View style={[styles.iconBox, { backgroundColor: "#F3E5F5" }]}>
+                <Ionicons name="help-buoy-outline" size={20} color="#9C27B0" />
+              </View>
+              <Text style={styles.menuText}>Trung tâm trợ giúp</Text>
+              <Ionicons name="chevron-forward" size={18} color="#CCC" />
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.menuItem}>
+              <View style={[styles.iconBox, { backgroundColor: "#FFEBEE" }]}>
+                <Ionicons
+                  name="shield-checkmark-outline"
+                  size={20}
+                  color="#F44336"
+                />
+              </View>
+              <Text style={styles.menuText}>Chính sách bảo mật</Text>
+              <Ionicons name="chevron-forward" size={18} color="#CCC" />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.menuItem, { borderBottomWidth: 0, marginTop: 5 }]}
+              onPress={handleLogout}
+            >
+              <View style={[styles.iconBox, { backgroundColor: "#FFEBEE" }]}>
+                <Ionicons name="log-out-outline" size={22} color="#F44336" />
+              </View>
+              <Text
+                style={[
+                  styles.menuText,
+                  { color: "#F44336", fontWeight: "bold" },
+                ]}
+              >
+                Đăng xuất
+              </Text>
+              <Ionicons name="chevron-forward" size={18} color="#FFEBEE" />
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.footer}>
+            <Text style={styles.versionText}>RAINN App v1.0.0</Text>
+          </View>
+
+          <View style={{ height: 100 }} />
+        </ScrollView>
+      </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#F9FAFB" },
+  mainContainer: { flex: 1, backgroundColor: "#F9FAFB" },
   center: { flex: 1, justifyContent: "center", alignItems: "center" },
   header: {
-    padding: 20,
+    paddingHorizontal: 20,
+    paddingBottom: 20,
     backgroundColor: "#fff",
     borderBottomWidth: 1,
     borderBottomColor: "#F0F0F0",
+    // ✅ Fix quan trọng: Đẩy Header xuống né Camera
+    paddingTop:
+      Platform.OS === "android" ? (StatusBar.currentHeight || 0) + 15 : 15,
   },
   headerTitle: { fontSize: 20, fontWeight: "bold", color: "#333" },
   userSection: {

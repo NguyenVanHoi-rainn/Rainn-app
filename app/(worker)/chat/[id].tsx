@@ -5,17 +5,15 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import {
   addDoc,
   collection,
+  deleteDoc,
   doc,
-  getDoc,
-  getDocs,
   onSnapshot,
   orderBy,
   query,
   serverTimestamp,
-  setDoc,
+  updateDoc,
   where,
 } from "firebase/firestore";
-// ✅ Import chuẩn từ thư viện và file config của bạn
 import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import React, { useEffect, useRef, useState } from "react";
 import {
@@ -25,30 +23,33 @@ import {
   Image,
   Keyboard,
   KeyboardAvoidingView,
+  Modal,
   Platform,
-  SafeAreaView,
+  StatusBar,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
-  TouchableWithoutFeedback,
   View,
 } from "react-native";
 import MapView, { Marker } from "react-native-maps";
-// ✅ Đảm bảo import 'storage' từ config để Client thấy được ảnh
 import { auth, db, storage } from "../../../configs/firebaseConfig";
 
 export default function WorkerChatDetailScreen() {
-  const { id } = useLocalSearchParams();
+  const { id } = useLocalSearchParams(); // Đây là clientId
   const router = useRouter();
 
-  const [clientName, setClientName] = useState("Khách hàng");
+  const [clientName, setClientName] = useState("");
   const [clientPhone, setClientPhone] = useState("");
   const [messages, setMessages] = useState<any[]>([]);
   const [inputText, setInputText] = useState("");
   const [uploading, setUploading] = useState(false);
-  const [jobStatus, setJobStatus] = useState<string>("accepted");
+  const [jobData, setJobData] = useState<any>(null);
   const [isKeyboardVisible, setKeyboardVisible] = useState(false);
+
+  // State cho Modal báo giá
+  const [showQuoteModal, setShowQuoteModal] = useState(false);
+  const [quoteAmount, setQuoteAmount] = useState("");
 
   const flatListRef = useRef<FlatList>(null);
   const currentUserId = auth.currentUser?.uid;
@@ -61,121 +62,153 @@ export default function WorkerChatDetailScreen() {
   };
 
   useEffect(() => {
-    const showSub = Keyboard.addListener("keyboardDidShow", () =>
-      setKeyboardVisible(true),
-    );
+    const showSub = Keyboard.addListener("keyboardDidShow", () => {
+      setKeyboardVisible(true);
+      setTimeout(
+        () => flatListRef.current?.scrollToEnd({ animated: true }),
+        100,
+      );
+    });
     const hideSub = Keyboard.addListener("keyboardDidHide", () =>
       setKeyboardVisible(false),
     );
 
     if (!currentUserId || !id) return;
 
-    const fetchData = async () => {
-      const userSnap = await getDoc(doc(db, "users", id as string));
-      if (userSnap.exists()) {
-        const data = userSnap.data();
-        setClientName(data.fullName || "Khách hàng");
+    // 1. Lấy thông tin khách hàng Real-time
+    const unsubUser = onSnapshot(doc(db, "users", id as string), (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        setClientName(data.fullName || data.name || "Khách hàng");
         setClientPhone(data.phone || "");
       }
-      const jobQuery = query(
+    });
+
+    // 2. Theo dõi trạng thái Job
+    const unsubJob = onSnapshot(
+      query(
         collection(db, "jobs"),
         where("workerId", "==", currentUserId),
         where("clientId", "==", id),
-        where("status", "==", "accepted"),
-      );
-      const jobSnap = await getDocs(jobQuery);
-      setJobStatus(jobSnap.empty ? "completed" : "accepted");
-    };
-    fetchData();
-
-    const chatId = getChatId();
-    const q = query(
-      collection(db, "chats", chatId, "messages"),
-      orderBy("createdAt", "asc"),
+      ),
+      (snap) => {
+        if (!snap.empty)
+          setJobData({ id: snap.docs[0].id, ...snap.docs[0].data() });
+      },
     );
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const msgList = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      }));
-      setMessages(msgList);
-      setTimeout(
-        () => flatListRef.current?.scrollToEnd({ animated: true }),
-        200,
-      );
-    });
+
+    // 3. Theo dõi Tin nhắn
+    const unsubChat = onSnapshot(
+      query(
+        collection(db, "chats", getChatId(), "messages"),
+        orderBy("createdAt", "asc"),
+      ),
+      (snapshot) => {
+        setMessages(
+          snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })),
+        );
+      },
+    );
 
     return () => {
-      unsubscribe();
+      unsubUser();
+      unsubJob();
+      unsubChat();
       showSub.remove();
       hideSub.remove();
     };
   }, [id, currentUserId]);
 
-  // ✅ SỬA HÀM UPLOAD: Dùng 'storage' đã khai báo để đẩy ảnh lên mây
-  const uploadImageAsync = async (uri: string) => {
-    const response = await fetch(uri);
-    const blob = await response.blob();
-    // Tạo đường dẫn file duy nhất
-    const fileRef = ref(
-      storage,
-      `chat_images/${getChatId()}_${Date.now()}.jpg`,
-    );
-    await uploadBytes(fileRef, blob);
-    return await getDownloadURL(fileRef);
-  };
-
+  // HÀM GỬI ẢNH
   const pickMedia = async () => {
     let result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["images", "videos"],
-      allowsEditing: false,
-      quality: 0.5, // Nén ảnh 50% để upload nhanh hơn
+      mediaTypes: ["images"],
+      quality: 0.5,
     });
-
     if (!result.canceled) {
       setUploading(true);
       try {
-        const downloadURL = await uploadImageAsync(result.assets[0].uri);
-
+        const response = await fetch(result.assets[0].uri);
+        const blob = await response.blob();
+        const fileRef = ref(storage, `chat_images/${Date.now()}.jpg`);
+        await uploadBytes(fileRef, blob);
+        const url = await getDownloadURL(fileRef);
         await addDoc(collection(db, "chats", getChatId(), "messages"), {
-          fileUrl: downloadURL, // Link HTTPS vĩnh viễn
+          fileUrl: url,
           senderId: currentUserId,
           createdAt: serverTimestamp(),
-          type: result.assets[0].type === "video" ? "video" : "image",
+          type: "image",
         });
       } catch (e) {
-        console.error(e);
-        Alert.alert("Lỗi", "Không thể gửi ảnh lên hệ thống Storage!");
+        Alert.alert("Lỗi", "Gửi ảnh thất bại.");
       } finally {
         setUploading(false);
       }
     }
   };
 
-  const sendMessage = async () => {
-    if (!currentUserId || !id || inputText.trim() === "") return;
-    const text = inputText.trim();
-    const chatId = getChatId();
-    setInputText("");
-    try {
-      await addDoc(collection(db, "chats", chatId, "messages"), {
-        text: text,
-        senderId: currentUserId,
-        createdAt: serverTimestamp(),
-        type: "text",
-      });
-      await setDoc(
-        doc(db, "chats", chatId),
+  // HÀM XÁC NHẬN GỬI GIÁ
+  const confirmSendQuote = async () => {
+    const price = parseInt(quoteAmount);
+    if (isNaN(price) || price <= 0 || !jobData)
+      return Alert.alert("Lỗi", "Giá không hợp lệ");
+    await updateDoc(doc(db, "jobs", jobData.id), { price, status: "quoted" });
+    await addDoc(collection(db, "chats", getChatId(), "messages"), {
+      text: `💰 BÁO GIÁ: ${price.toLocaleString()} VNĐ.`,
+      senderId: currentUserId,
+      createdAt: serverTimestamp(),
+      type: "quote",
+    });
+    setShowQuoteModal(false);
+    setQuoteAmount("");
+  };
+
+  // HÀM HOÀN THÀNH CÔNG VIỆC
+  const handleCompleteJob = async () => {
+    if (!jobData) return;
+    Alert.alert(
+      "Xác nhận",
+      "Bạn đã hoàn thành công việc và muốn kết thúc đơn hàng?",
+      [
+        { text: "Hủy" },
         {
-          lastMessage: text,
-          updatedAt: serverTimestamp(),
-          users: [currentUserId, id],
+          text: "Hoàn thành",
+          onPress: async () => {
+            await updateDoc(doc(db, "jobs", jobData.id), {
+              status: "completed",
+              completedAt: serverTimestamp(),
+            });
+            await addDoc(collection(db, "chats", getChatId(), "messages"), {
+              text: "🏁 Thợ đã xác nhận hoàn thành công việc.",
+              senderId: currentUserId,
+              createdAt: serverTimestamp(),
+              type: "system",
+            });
+          },
         },
-        { merge: true },
-      );
-    } catch (e) {
-      console.error(e);
-    }
+      ],
+    );
+  };
+
+  // HÀM HỦY ĐƠN
+  const handleCancelJob = () => {
+    Alert.alert("Hủy đơn", "Đơn về danh sách chờ và xóa cuộc trò chuyện này?", [
+      { text: "Không" },
+      {
+        text: "Đồng ý",
+        onPress: async () => {
+          if (jobData) {
+            await updateDoc(doc(db, "jobs", jobData.id), {
+              status: "pending",
+              workerId: null,
+              price: null,
+            });
+            await deleteDoc(doc(db, "chats", getChatId()));
+            router.replace("/(worker)/(tabs)/chat-list");
+          }
+        },
+      },
+    ]);
   };
 
   const renderMessage = ({ item }: { item: any }) => {
@@ -186,20 +219,17 @@ export default function WorkerChatDetailScreen() {
           style={[
             styles.bubble,
             isMe ? styles.myBubble : styles.otherBubble,
-            item.type === "image" && {
+            item.type === "quote" && styles.quoteBubble,
+            (item.type === "image" || item.type === "location") && {
               padding: 0,
               overflow: "hidden",
-              backgroundColor: "transparent",
             },
           ]}
         >
-          {item.type === "image" ? (
-            <Image
-              source={{ uri: item.fileUrl }}
-              style={styles.chatImage}
-              resizeMode="cover"
-            />
-          ) : item.type === "location" ? (
+          {item.type === "image" && (
+            <Image source={{ uri: item.fileUrl }} style={styles.chatImage} />
+          )}
+          {item.type === "location" && (
             <View style={styles.miniMapContainer}>
               <MapView
                 style={styles.miniMap}
@@ -219,195 +249,309 @@ export default function WorkerChatDetailScreen() {
                 />
               </MapView>
             </View>
-          ) : (
-            <Text style={{ fontSize: 15, color: isMe ? "#fff" : "#333" }}>
-              {item.text}
-            </Text>
           )}
+          <Text
+            style={{
+              fontSize: 15,
+              color: isMe || item.type === "quote" ? "#fff" : "#333",
+              textAlign: item.type === "system" ? "center" : "left",
+            }}
+          >
+            {item.text}
+          </Text>
         </View>
       </View>
     );
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === "android" ? "padding" : "padding"}
-        keyboardVerticalOffset={0} // Để sát đáy cho Android
-      >
-        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-          <View style={{ flex: 1 }}>
-            {/* Header sát mép trên */}
-            <View style={styles.header}>
-              <TouchableOpacity
-                onPress={() => router.back()}
-                style={styles.backBtn}
-              >
-                <Ionicons name="arrow-back" size={24} color="#333" />
-              </TouchableOpacity>
-              <Text style={styles.headerTitle}>{clientName}</Text>
-              <TouchableOpacity
-                onPress={() =>
-                  clientPhone && Linking.openURL(`tel:${clientPhone}`)
-                }
-                style={styles.callBtn}
-              >
-                <Feather name="phone" size={20} color="#1BA39C" />
-              </TouchableOpacity>
-            </View>
+    <View style={styles.container}>
+      <View style={styles.headerWrapper}>
+        <View style={styles.header}>
+          <TouchableOpacity
+            onPress={() => router.replace("/(worker)/(tabs)/chat-list")}
+          >
+            <Ionicons name="arrow-back" size={24} color="#333" />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={{ flex: 1, marginLeft: 15 }}
+            onPress={() =>
+              router.push({
+                pathname: "/(worker)/chat/profile-detail" as any,
+                params: { userId: id },
+              })
+            }
+          >
+            <Text style={styles.headerTitle}>
+              {clientName || "Đang tải..."}
+            </Text>
+            <Text style={{ fontSize: 12, color: "#1BA39C" }}>
+              Xem hồ sơ khách
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.callBtn}
+            onPress={() => Linking.openURL(`tel:${clientPhone}`)}
+          >
+            <Feather name="phone" size={20} color="#1BA39C" />
+          </TouchableOpacity>
+        </View>
 
-            <View style={styles.reportBar}>
-              <View style={styles.reportInfo}>
-                <Ionicons
-                  name={
-                    jobStatus === "accepted"
-                      ? "time-outline"
-                      : "checkmark-circle"
-                  }
-                  size={20}
-                  color={jobStatus === "accepted" ? "#E67E22" : "#1BA39C"}
-                />
-                <Text style={styles.reportText}>
-                  {jobStatus === "accepted"
-                    ? "Đang thực hiện"
-                    : "Đã hoàn thành"}
-                </Text>
-              </View>
-            </View>
-
-            <FlatList
-              ref={flatListRef}
-              data={messages}
-              keyExtractor={(item) => item.id}
-              renderItem={renderMessage}
-              contentContainerStyle={{ padding: 15, paddingBottom: 20 }}
-              style={{ flex: 1 }}
-              onContentSizeChange={() =>
-                flatListRef.current?.scrollToEnd({ animated: true })
-              }
-            />
-
-            {/* Ô nhập liệu hạ thấp sát đáy (15px) */}
-            <View
+        <View style={styles.toolBar}>
+          {(jobData?.status === "accepted" ||
+            jobData?.status === "rejected") && (
+            <TouchableOpacity
+              style={styles.toolBtn}
+              onPress={() => setShowQuoteModal(true)}
+            >
+              <Text style={styles.toolText}>Báo giá</Text>
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity
+            style={[
+              styles.toolBtn,
+              jobData?.status === "confirmed"
+                ? styles.completeBtnActive
+                : styles.completeBtnDisabled,
+            ]}
+            onPress={handleCompleteJob}
+            disabled={jobData?.status !== "confirmed"}
+          >
+            <Text
               style={[
-                styles.inputArea,
-                { paddingBottom: isKeyboardVisible ? 10 : 15 },
+                styles.toolText,
+                { color: jobData?.status === "confirmed" ? "#fff" : "#CCC" },
               ]}
             >
-              <TouchableOpacity onPress={pickMedia} style={styles.plusBtn}>
-                {uploading ? (
-                  <ActivityIndicator size="small" color="#1BA39C" />
-                ) : (
-                  <Feather name="image" size={24} color="#1BA39C" />
-                )}
+              Hoàn thành
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.toolBtn, { borderColor: "#FF3B30" }]}
+            onPress={handleCancelJob}
+          >
+            <Text style={[styles.toolText, { color: "#FF3B30" }]}>Hủy đơn</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        style={{ flex: 1 }}
+      >
+        <FlatList
+          ref={flatListRef}
+          data={messages}
+          keyExtractor={(item) => item.id}
+          renderItem={renderMessage}
+          contentContainerStyle={{
+            paddingHorizontal: 15,
+            paddingTop: 10,
+            paddingBottom: 15,
+          }}
+          style={{ flex: 1 }}
+          onContentSizeChange={() =>
+            flatListRef.current?.scrollToEnd({ animated: true })
+          }
+        />
+
+        <View
+          style={[
+            styles.inputArea,
+            {
+              paddingBottom: isKeyboardVisible
+                ? 15
+                : Platform.OS === "android"
+                  ? 35
+                  : 25,
+            },
+          ]}
+        >
+          <TouchableOpacity onPress={pickMedia} style={styles.plusBtn}>
+            {uploading ? (
+              <ActivityIndicator size="small" color="#1BA39C" />
+            ) : (
+              <Feather name="image" size={24} color="#1BA39C" />
+            )}
+          </TouchableOpacity>
+          <TextInput
+            style={styles.input}
+            value={inputText}
+            onChangeText={setInputText}
+            placeholder="Tin nhắn..."
+            multiline
+            onBlur={() => setKeyboardVisible(false)}
+          />
+          <TouchableOpacity
+            style={styles.sendBtn}
+            onPress={() => {
+              if (inputText.trim()) {
+                addDoc(collection(db, "chats", getChatId(), "messages"), {
+                  text: inputText,
+                  senderId: currentUserId,
+                  createdAt: serverTimestamp(),
+                  type: "text",
+                });
+                setInputText("");
+              }
+            }}
+          >
+            <Ionicons name="send" size={22} color="#fff" />
+          </TouchableOpacity>
+        </View>
+      </KeyboardAvoidingView>
+
+      {/* MODAL BÁO GIÁ */}
+      <Modal visible={showQuoteModal} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Nhập báo giá (VNĐ)</Text>
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Ví dụ: 200000"
+              keyboardType="numeric"
+              value={quoteAmount}
+              onChangeText={setQuoteAmount}
+              autoFocus={true}
+            />
+            <View style={{ flexDirection: "row", gap: 10 }}>
+              <TouchableOpacity
+                style={[styles.modalBtn, { backgroundColor: "#EEE" }]}
+                onPress={() => setShowQuoteModal(false)}
+              >
+                <Text>Hủy</Text>
               </TouchableOpacity>
-              <TextInput
-                style={styles.input}
-                value={inputText}
-                onChangeText={setInputText}
-                placeholder="Viết tin nhắn..."
-                multiline
-                onFocus={() =>
-                  setTimeout(() => flatListRef.current?.scrollToEnd(), 200)
-                }
-              />
-              <TouchableOpacity style={styles.sendBtn} onPress={sendMessage}>
-                <Ionicons name="send" size={20} color="#fff" />
+              <TouchableOpacity
+                style={[styles.modalBtn, { backgroundColor: "#1BA39C" }]}
+                onPress={confirmSendQuote}
+              >
+                <Text style={{ color: "#fff", fontWeight: "bold" }}>
+                  Gửi giá
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
-        </TouchableWithoutFeedback>
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+        </View>
+      </Modal>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F5F7FB" },
+  headerWrapper: {
+    backgroundColor: "#fff",
+    paddingTop: Platform.OS === "android" ? StatusBar.currentHeight || 0 : 0,
+    borderBottomWidth: 1,
+    borderBottomColor: "#EEE",
+    elevation: 3,
+  },
   header: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
     paddingHorizontal: 15,
-    paddingVertical: 10,
-    backgroundColor: "#fff",
-    borderBottomWidth: 1,
-    borderBottomColor: "#EEE",
-    paddingTop: Platform.OS === "android" ? 5 : 15,
+    paddingVertical: 12,
   },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: "bold",
-    color: "#333",
-    flex: 1,
-    marginLeft: 10,
-  },
+  headerTitle: { fontSize: 17, fontWeight: "bold", color: "#333" },
   callBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     backgroundColor: "#F0F9F8",
     justifyContent: "center",
     alignItems: "center",
   },
-  reportBar: {
-    backgroundColor: "#fff",
-    paddingHorizontal: 15,
-    paddingVertical: 8,
+  toolBar: {
     flexDirection: "row",
-    alignItems: "center",
-    borderBottomWidth: 1,
-    borderBottomColor: "#E0E0E0",
+    padding: 10,
+    justifyContent: "space-around",
+    gap: 5,
+    borderTopWidth: 1,
+    borderTopColor: "#F5F5F5",
   },
-  reportInfo: { flexDirection: "row", alignItems: "center", flex: 1 },
-  reportText: { fontSize: 14, color: "#555", marginLeft: 8, fontWeight: "500" },
-  backBtn: { padding: 2 },
-  msgRow: { marginBottom: 15, flexDirection: "row", width: "100%" },
+  toolBtn: {
+    flex: 1,
+    alignItems: "center",
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#1BA39C",
+  },
+  toolText: { color: "#1BA39C", fontWeight: "bold", fontSize: 11 },
+  completeBtnActive: { backgroundColor: "#1BA39C" },
+  completeBtnDisabled: { borderColor: "#EEE", backgroundColor: "#F9F9F9" },
+  msgRow: { marginBottom: 15, flexDirection: "row" },
   myRow: { justifyContent: "flex-end" },
   otherRow: { justifyContent: "flex-start" },
-  bubble: { maxWidth: "80%", padding: 10, borderRadius: 18 },
+  bubble: { maxWidth: "80%", padding: 12, borderRadius: 20 },
   myBubble: { backgroundColor: "#1BA39C", borderBottomRightRadius: 2 },
   otherBubble: {
     backgroundColor: "#fff",
     borderBottomLeftRadius: 2,
     elevation: 1,
   },
+  quoteBubble: { backgroundColor: "#E67E22", borderBottomRightRadius: 2 },
   chatImage: { width: 220, height: 160, borderRadius: 12 },
   miniMapContainer: {
-    width: 220,
-    height: 150,
-    borderRadius: 12,
+    width: 240,
+    height: 160,
+    borderRadius: 15,
     overflow: "hidden",
   },
   miniMap: { width: "100%", height: "100%" },
   inputArea: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 12,
-    paddingTop: 10,
+    padding: 10,
     backgroundColor: "#fff",
     borderTopWidth: 1,
     borderTopColor: "#EEE",
   },
-  plusBtn: { marginRight: 10 },
   input: {
     flex: 1,
     backgroundColor: "#F0F2F5",
     borderRadius: 22,
     paddingHorizontal: 15,
-    paddingVertical: 8,
-    fontSize: 16,
+    paddingVertical: 10,
     maxHeight: 100,
-    color: "#333",
   },
   sendBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     backgroundColor: "#1BA39C",
     justifyContent: "center",
     alignItems: "center",
     marginLeft: 8,
+  },
+  plusBtn: { marginRight: 10 },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  modalContent: {
+    width: "85%",
+    backgroundColor: "#fff",
+    borderRadius: 20,
+    padding: 25,
+    alignItems: "center",
+  },
+  modalTitle: { fontSize: 18, fontWeight: "bold", marginBottom: 20 },
+  modalInput: {
+    width: "100%",
+    backgroundColor: "#F0F2F5",
+    borderRadius: 12,
+    padding: 15,
+    fontSize: 20,
+    textAlign: "center",
+    marginBottom: 20,
+  },
+  modalBtn: {
+    flex: 1,
+    paddingVertical: 15,
+    borderRadius: 12,
+    alignItems: "center",
   },
 });

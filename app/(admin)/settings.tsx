@@ -1,14 +1,22 @@
-import React, { useState, useEffect } from "react";
-import { 
-  View, Text, StyleSheet, SafeAreaView, TextInput, 
-  TouchableOpacity, Alert, ActivityIndicator, ScrollView 
-} from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
+import React, { useEffect, useState } from "react";
+import {
+  ActivityIndicator,
+  Alert,
+  Platform,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from "react-native";
 
 // Firebase
+import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
 import { db } from "../../configs/firebaseConfig";
-import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 
 export default function AdminSettings() {
   const router = useRouter();
@@ -22,7 +30,6 @@ export default function AdminSettings() {
   const [minWithdraw, setMinWithdraw] = useState("");
 
   useEffect(() => {
-    // Lấy cấu hình hiện tại từ Firestore
     const fetchSettings = async () => {
       try {
         const docSnap = await getDoc(doc(db, "system", "config"));
@@ -43,80 +50,131 @@ export default function AdminSettings() {
   }, []);
 
   const handleSave = async () => {
+    // Ép kiểu và kiểm tra dữ liệu trước khi lưu
+    const rate = parseFloat(commission);
+    const minAmt = parseInt(minWithdraw);
+
+    if (isNaN(rate) || rate < 0 || rate > 100) {
+      return Alert.alert("Lỗi", "Phần trăm hoa hồng phải từ 0 đến 100.");
+    }
+    if (isNaN(minAmt) || minAmt < 0) {
+      return Alert.alert("Lỗi", "Số tiền rút tối thiểu không hợp lệ.");
+    }
+
     setSaving(true);
     try {
-      // Lưu đè cấu hình mới vào document cố định
-      await setDoc(doc(db, "system", "config"), {
-        commissionRate: parseFloat(commission),
-        hotline: hotline,
-        isMaintenance: isMaintenance,
-        minWithdraw: parseInt(minWithdraw),
-        updatedAt: serverTimestamp(),
-      });
+      await setDoc(
+        doc(db, "system", "config"),
+        {
+          commissionRate: rate, // Lưu dạng Number để thợ tính toán được
+          hotline: hotline.trim(),
+          isMaintenance: isMaintenance,
+          minWithdraw: minAmt,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true },
+      );
+
       Alert.alert("Thành công", "Đã cập nhật cấu hình hệ thống!");
     } catch (e) {
-      Alert.alert("Lỗi", "Không thể lưu cài đặt.");
+      Alert.alert(
+        "Lỗi",
+        "Không thể lưu cài đặt. Kiểm tra quyền ghi Firestore.",
+      );
     } finally {
       setSaving(false);
     }
   };
 
-  if (loading) return <View style={styles.center}><ActivityIndicator color="#1BA39C" /></View>;
+  if (loading)
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator size="large" color="#1BA39C" />
+        <Text style={{ marginTop: 10, color: "#666" }}>
+          Đang tải cấu hình...
+        </Text>
+      </View>
+    );
 
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={24} color="#333" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Cấu hình hệ thống</Text>
-        <TouchableOpacity onPress={handleSave} disabled={saving}>
-          {saving ? <ActivityIndicator size="small" color="#1BA39C" /> : 
+        <TouchableOpacity
+          onPress={handleSave}
+          disabled={saving}
+          style={styles.saveBtn}
+        >
+          {saving ? (
+            <ActivityIndicator size="small" color="#1BA39C" />
+          ) : (
             <Text style={styles.saveText}>Lưu</Text>
-          }
+          )}
         </TouchableOpacity>
       </View>
 
-      <ScrollView style={styles.content}>
+      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+        {/* PHẦN TÀI CHÍNH */}
         <View style={styles.section}>
           <Text style={styles.sectionLabel}>Tài chính & Hoa hồng</Text>
-          
+
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Phần trăm phí dịch vụ (%)</Text>
             <View style={styles.inputWrapper}>
-              <MaterialCommunityIcons name="percent" size={20} color="#666" />
-              <TextInput 
-                style={styles.input} 
-                value={commission} 
+              <MaterialCommunityIcons
+                name="percent"
+                size={20}
+                color="#1BA39C"
+              />
+              <TextInput
+                style={styles.input}
+                value={commission}
                 onChangeText={setCommission}
                 keyboardType="numeric"
+                placeholder="Ví dụ: 10"
               />
             </View>
+            <Text style={styles.hint}>
+              App sẽ thu {commission || "0"}% trên mỗi đơn hàng.
+            </Text>
           </View>
 
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Số tiền rút tối thiểu (VNĐ)</Text>
             <View style={styles.inputWrapper}>
-              <MaterialCommunityIcons name="bank-transfer-out" size={20} color="#666" />
-              <TextInput 
-                style={styles.input} 
-                value={minWithdraw} 
+              <MaterialCommunityIcons
+                name="bank-transfer-out"
+                size={20}
+                color="#1BA39C"
+              />
+              <TextInput
+                style={styles.input}
+                value={minWithdraw}
                 onChangeText={setMinWithdraw}
                 keyboardType="numeric"
+                placeholder="Ví dụ: 50000"
               />
             </View>
+            <Text style={styles.hint}>
+              Định dạng: {parseInt(minWithdraw || "0").toLocaleString("vi-VN")}{" "}
+              VNĐ
+            </Text>
           </View>
         </View>
 
+        {/* PHẦN HỖ TRỢ */}
         <View style={styles.section}>
           <Text style={styles.sectionLabel}>Hỗ trợ & Liên hệ</Text>
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Số điện thoại Hotline</Text>
             <View style={styles.inputWrapper}>
-              <Ionicons name="call-outline" size={20} color="#666" />
-              <TextInput 
-                style={styles.input} 
-                value={hotline} 
+              <Ionicons name="call-outline" size={20} color="#1BA39C" />
+              <TextInput
+                style={styles.input}
+                value={hotline}
                 onChangeText={setHotline}
                 keyboardType="phone-pad"
               />
@@ -124,30 +182,34 @@ export default function AdminSettings() {
           </View>
         </View>
 
+        {/* PHẦN VẬN HÀNH */}
         <View style={styles.section}>
           <Text style={styles.sectionLabel}>Trạng thái vận hành</Text>
-          <TouchableOpacity 
-            style={styles.maintenanceRow} 
-            onPress={() => setIsMaintenance(!isMaintenance)}
-          >
+          <View style={styles.maintenanceRow}>
             <View style={{ flex: 1 }}>
               <Text style={styles.maintenanceTitle}>Chế độ bảo trì</Text>
-              <Text style={styles.maintenanceSub}>Người dùng sẽ không thể đặt lịch khi bật</Text>
+              <Text style={styles.maintenanceSub}>
+                Khi bật, Client sẽ không thể tạo đơn hàng mới.
+              </Text>
             </View>
-            <Ionicons 
-              name={isMaintenance ? "toggle" : "toggle-outline"} 
-              size={45} 
-              color={isMaintenance ? "#FF3B30" : "#CCC"} 
-            />
-          </TouchableOpacity>
+            <TouchableOpacity onPress={() => setIsMaintenance(!isMaintenance)}>
+              <Ionicons
+                name={isMaintenance ? "toggle" : "toggle-outline"}
+                size={50}
+                color={isMaintenance ? "#FF3B30" : "#CCC"}
+              />
+            </TouchableOpacity>
+          </View>
         </View>
 
         <View style={styles.infoBox}>
-          <Ionicons name="information-circle-outline" size={18} color="#666" />
+          <Ionicons name="alert-circle-outline" size={20} color="#1BA39C" />
           <Text style={styles.infoText}>
-            Lưu ý: Mọi thay đổi ở đây sẽ có hiệu lực ngay lập tức đối với tất cả người dùng RAINN.
+            Lưu ý: Mọi thay đổi sẽ có hiệu lực ngay lập tức. Hãy kiểm tra kỹ các
+            thông số tài chính trước khi lưu.
           </Text>
         </View>
+        <View style={{ height: 50 }} />
       </ScrollView>
     </SafeAreaView>
   );
@@ -155,26 +217,83 @@ export default function AdminSettings() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F9FAFB" },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  header: { 
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', 
-    padding: 20, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#EEE' 
+  center: { flex: 1, justifyContent: "center", alignItems: "center" },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 20,
+    paddingBottom: 15,
+    backgroundColor: "#fff",
+    borderBottomWidth: 1,
+    borderBottomColor: "#EEE",
+    paddingTop: Platform.OS === "android" ? 45 : 15,
   },
-  headerTitle: { fontSize: 18, fontWeight: 'bold' },
-  saveText: { color: '#1BA39C', fontWeight: 'bold', fontSize: 16 },
+  headerTitle: { fontSize: 20, fontWeight: "bold", color: "#333" },
+  backBtn: { padding: 5 },
+  saveBtn: { padding: 5 },
+  saveText: { color: "#1BA39C", fontWeight: "bold", fontSize: 17 },
   content: { padding: 20 },
-  section: { backgroundColor: '#fff', borderRadius: 15, padding: 15, marginBottom: 20, elevation: 1 },
-  sectionLabel: { fontSize: 13, fontWeight: 'bold', color: '#AAA', marginBottom: 15, textTransform: 'uppercase' },
-  inputGroup: { marginBottom: 15 },
-  label: { fontSize: 14, color: '#333', marginBottom: 8 },
-  inputWrapper: { 
-    flexDirection: 'row', alignItems: 'center', backgroundColor: '#F9FAFB', 
-    borderWidth: 1, borderColor: '#EEE', borderRadius: 10, paddingHorizontal: 12 
+  section: {
+    backgroundColor: "#fff",
+    borderRadius: 20,
+    padding: 18,
+    marginBottom: 20,
+    elevation: 3,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
   },
-  input: { flex: 1, padding: 12, fontSize: 16, color: '#333' },
-  maintenanceRow: { flexDirection: 'row', alignItems: 'center' },
-  maintenanceTitle: { fontSize: 16, fontWeight: 'bold', color: '#333' },
-  maintenanceSub: { fontSize: 12, color: '#999', marginTop: 2 },
-  infoBox: { flexDirection: 'row', padding: 15, backgroundColor: '#E0F2F1', borderRadius: 10, alignItems: 'center' },
-  infoText: { flex: 1, marginLeft: 10, fontSize: 12, color: '#666', lineHeight: 18 }
+  sectionLabel: {
+    fontSize: 12,
+    fontWeight: "bold",
+    color: "#999",
+    marginBottom: 15,
+    letterSpacing: 1,
+    textTransform: "uppercase",
+  },
+  inputGroup: { marginBottom: 18 },
+  label: { fontSize: 14, color: "#444", marginBottom: 8, fontWeight: "500" },
+  inputWrapper: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F9FAFB",
+    borderWidth: 1,
+    borderColor: "#F0F0F0",
+    borderRadius: 12,
+    paddingHorizontal: 15,
+  },
+  input: {
+    flex: 1,
+    padding: 14,
+    fontSize: 16,
+    color: "#333",
+    fontWeight: "bold",
+  },
+  hint: { fontSize: 11, color: "#1BA39C", marginTop: 5, fontStyle: "italic" },
+  maintenanceRow: { flexDirection: "row", alignItems: "center" },
+  maintenanceTitle: { fontSize: 16, fontWeight: "bold", color: "#333" },
+  maintenanceSub: {
+    fontSize: 12,
+    color: "#999",
+    marginTop: 4,
+    paddingRight: 10,
+  },
+  infoBox: {
+    flexDirection: "row",
+    padding: 15,
+    backgroundColor: "#E0F2F1",
+    borderRadius: 15,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#B2DFDB",
+  },
+  infoText: {
+    flex: 1,
+    marginLeft: 10,
+    fontSize: 12,
+    color: "#00695C",
+    lineHeight: 18,
+  },
 });
